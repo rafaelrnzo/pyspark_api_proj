@@ -1,0 +1,35 @@
+from fastapi import FastAPI
+from pyspark.sql import SparkSession
+import os
+import sys
+
+os.environ['PYSPARK_PYTHON'] = sys.executable
+os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
+
+app = FastAPI()
+
+spark = SparkSession.builder \
+    .appName("FastAPI Spark Job") \
+    .master("local[*]") \
+    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.1.1") \
+    .getOrCreate()
+
+@app.get("/spark-job")
+def run_spark_job():
+    try:
+        df = spark \
+            .read \
+            .format("kafka") \
+            .option("kafka.bootstrap.servers", "127.0.0.1:9092") \
+            .option("subscribe", "climate_data.temperature_data") \
+            .load()
+        
+        # Process the DataFrame
+        df = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
+        result = df.limit(5).collect()
+        result_list = [{"key": row["key"], "value": row["value"]} for row in result]
+
+        return {"status": "Spark job completed", "data": result_list}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
