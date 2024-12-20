@@ -4,17 +4,21 @@ import os
 import sys
 from pyspark.sql.functions import expr, regexp_replace, col, from_json
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
-# import utils.schema as schema  
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType
+from fastapi.middleware.cors import CORSMiddleware
 
-# Set environment variables for PySpark to use the current Python environment
 os.environ['PYSPARK_PYTHON'] = sys.executable
 os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
 
-# FastAPI app initialization
 app = FastAPI()
 
-# Spark session setup
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust this to restrict allowed origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 spark = SparkSession.builder \
     .appName("FastAPI Spark Job") \
     .master("local[*]") \
@@ -38,7 +42,7 @@ def run_spark_job():
             "clean_value",
             regexp_replace(col("value"), r"[^ -~]", "")  
         )
-        
+
         schema = StructType([
             StructField("_id", StructType([
                 StructField("$oid", StringType(), True)
@@ -76,7 +80,7 @@ def run_spark_job():
 
         streaming_df = cleaned_kafka_df.withColumn(
             "values_json", 
-            from_json(col("clean_value"), schema)  # Use the schema from utils
+            from_json(col("clean_value"), schema)  
         ).selectExpr("values_json.*")
 
         # Flatten the fullDocument column
@@ -99,4 +103,3 @@ def run_spark_job():
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
