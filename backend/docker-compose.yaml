@@ -1,0 +1,127 @@
+version: '2.4'
+services:
+  ed-pyspark-jupyter:
+    image: jupyter/pyspark-notebook:spark-3.3.0
+    user: root
+    container_name: ed-pyspark-jupyter-lab
+    ports:
+      - 8888:8888
+      - 4040:4040
+    environment:
+      JUPYTER_PORT: 8888
+      SPARK_UI_PORT: 4040
+      GRANT_SUDO: yes
+    volumes:
+      - streaming_data:/data:rw
+
+  ed-spark:
+    image: bitnami/spark:3.3.0
+    container_name: ed-spark
+    depends_on:
+      - ed-zookeeper
+      - ed-kafka
+    ports:
+      - 7077:7077
+      - 8080:8080
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: "false"
+      SPARK_RPC_ENCRYPTION_ENABLED: "false"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "false"
+      SPARK_SSL_ENABLED: "false"
+    volumes:
+      - streaming_data:/data:rw
+
+  ed-zookeeper:
+    image: confluentinc/cp-zookeeper:6.0.1
+    container_name: ed-zookeeper
+    ports:
+      - 2181:2181
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  ed-kafka:
+    image: confluentinc/cp-kafka:6.0.1
+    container_name: ed-kafka
+    depends_on:
+      - ed-zookeeper
+    ports:
+      - 9092:9092
+      - 29092:29092
+    volumes:
+      - streaming_data:/data:rw
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: ed-zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://ed-kafka:29092,PLAINTEXT_HOST://127.0.0.1:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:6.0.1
+    container_name: schema-registry
+    depends_on:
+      - ed-kafka
+    ports:
+      - 8081:8081
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: ed-kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:6.0.1
+    container_name: kafka-connect
+    depends_on:
+      - ed-kafka
+      - schema-registry
+      - mongo
+    ports:
+      - 8083:8083
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: ed-kafka:29092
+      CONNECT_REST_PORT: 8083
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_GROUP_ID: kafka-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+    volumes:
+      - ./data:/data
+      - ./plugins:/plugins
+
+  mongo:
+    image: mongo:latest
+    container_name: mongo
+    ports:
+      - 27017:27017
+    volumes:
+      - mongo_data:/data/db
+
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:6.0.1
+    container_name: control-center
+    depends_on:
+      - ed-kafka
+      - schema-registry
+      - kafka-connect
+    ports:
+      - 9021:9021
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: ed-kafka:29092
+      CONTROL_CENTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONTROL_CENTER_CONNECT_CLUSTER: http://kafka-connect:8083
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+
+volumes:
+  streaming_data:
+  mongo_data:
